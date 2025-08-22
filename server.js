@@ -1,133 +1,104 @@
-const express = require('express');
-const bodyParser = require('body-parser');
-const { v4: uuidv4 } = require('uuid');
+// server.js
+import express from "express";
+import { createClient } from "@supabase/supabase-js";
+import { v4 as uuidv4 } from "uuid";
 
 const app = express();
-app.use(bodyParser.json());
+app.use(express.json());
 
-/**
- * Simple phone number validation for Ghana
- */
-function validateGhanaPhoneNumber(msisdn) {
-  const regex = /^233[0-9]{9}$/; // Ghana MSISDN format
-  return regex.test(msisdn);
-}
+// Supabase setup
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
 
-// ----------------- STATE MANAGEMENT -----------------
-const sessions = {}; // Store all session states by SESSIONID
-
-/**
- * Handle USSD requests based on state
- */
-async function handleUSSDRequest({ userId, msisdn, userData, msgType, network, sessionId }) {
-  if (!sessions[sessionId]) {
-    sessions[sessionId] = {
-      step: 0,
-      flow: null,
-      data: {}
-    };
-  }
-
-  const state = sessions[sessionId];
-
-  // 🌍 If it's a new session or first input
-  if (state.step === 0 && msgType === true) {
-    state.step = 1;
-    return {
-      MSISDN: msisdn,
-      MSG: "Welcome to Quick Loans\n1. Register\n2. About\n3. Exit",
-      MSGTYPE: true
-    };
-  }
-
-  // 🌍 Handle menu navigation
-  if (state.flow === null) {
-    switch (userData.trim()) {
-      case "1":
-        state.flow = "registration";
-        state.step = 1;
-        return { MSISDN: msisdn, MSG: "Enter your full name:", MSGTYPE: true };
-      case "2":
-        return { MSISDN: msisdn, MSG: "Quick Loans offers instant loans. Dial again to continue.", MSGTYPE: false };
-      case "3":
-        return { MSISDN: msisdn, MSG: "Thank you for using Quick Loans. Goodbye!", MSGTYPE: false };
-      default:
-        return { MSISDN: msisdn, MSG: "Invalid option. Try again.\n1. Register\n2. About\n3. Exit", MSGTYPE: true };
-    }
-  }
-
-  // 🌍 Registration flow
-  if (state.flow === "registration") {
-    if (state.step === 1) {
-      state.data.name = userData.trim();
-      state.step = 2;
-      return { MSISDN: msisdn, MSG: "Enter your date of birth (DD/MM/YYYY):", MSGTYPE: true };
-    } else if (state.step === 2) {
-      state.data.dob = userData.trim();
-      state.step = 3;
-      return { MSISDN: msisdn, MSG: "Enter your National ID number:", MSGTYPE: true };
-    } else if (state.step === 3) {
-      state.data.id = userData.trim();
-      state.flow = null;
-      state.step = 0;
-      return { MSISDN: msisdn, MSG: "Registration successful! Thank you.", MSGTYPE: false };
-    }
-  }
-
-  // Fallback
-  return { MSISDN: msisdn, MSG: "Invalid input. Please try again.", MSGTYPE: true };
-}
-
-// ----------------- ENDPOINT -----------------
-app.post('/ussd', async (req, res) => {
-  let { USERID, MSISDN, USERDATA, MSGTYPE, NETWORK, SESSIONID } = req.body;
-  console.log("📲 Incoming USSD Request:", req.body);
-
+app.post("/ussd", async (req, res) => {
   try {
-    // Always generate USERID if not provided
-    USERID = USERID || `USER-${MSISDN}`;
+    const { MSISDN, USERDATA } = req.body;
 
-    // Generate SESSIONID if not provided
-    SESSIONID = SESSIONID || uuidv4();
+    // Fetch or create session
+    let { data: sessions } = await supabase
+      .from("ussd_sessions")
+      .select("*")
+      .eq("msisdn", MSISDN)
+      .limit(1);
 
-    if (!validateGhanaPhoneNumber(MSISDN)) {
-      return res.json({
-        USERID,
-        MSISDN,
-        SESSIONID,
-        MSG: "Invalid phone number format. Please use a Ghanaian number starting with 233.",
-        MSGTYPE: false
-      });
+    let session = sessions?.[0];
+    if (!session) {
+      const { data, error } = await supabase
+        .from("ussd_sessions")
+        .insert([{ msisdn: MSISDN, step: 0, data: {} }])
+        .select()
+        .single();
+
+      if (error) throw error;
+      session = data;
     }
 
-    const response = await handleUSSDRequest({
-      userId: USERID,
-      msisdn: MSISDN,
-      userData: USERDATA || "",
-      msgType: MSGTYPE,
-      network: NETWORK,
-      sessionId: SESSIONID
+    let responseMsg = "";
+    let continueSession = true;
+
+    switch (session.step) {
+      case 0:
+        responseMsg = "Welcome to Quick Loans\n1. Register\n2. About\n3. Exit";
+        await supabase.from("ussd_sessions").update({ step: 1 }).eq("id", session.id);
+        break;
+
+      case 1:
+        if (USERDATA === "1") {
+          responseMsg = "Enter your full name:";
+          await supabase.from("ussd_sessions").update({ step: 2 }).eq("id", session.id);
+        } else if (USERDATA === "2") {
+          responseMsg = "This is a loan application system.";
+          continueSession = false;
+        } else if (USERDATA === "3") {
+          responseMsg = "Thank you for using Quick Loans. Goodbye!";
+          continueSession = false;
+        } else {
+          responseMsg = "Invalid choice. Try again.\n1. Register\n2. About\n3. Exit";
+        }
+        break;
+
+      case 2:
+        responseMsg = "Enter your date of birth (DD/MM/YYYY):";
+        await supabase.from("ussd_sessions").update({ step: 3, data: { name: USERDATA } }).eq("id", session.id);
+        break;
+
+      case 3:
+        responseMsg = "Enter your National ID number:";
+        await supabase.from("ussd_sessions").update({
+          step: 4,
+          data: { ...session.data, dob: USERDATA }
+        }).eq("id", session.id);
+        break;
+
+      case 4:
+        responseMsg = `Registration successful! Thank you, ${session.data?.name || "user"}.`;
+        continueSession = false;
+        break;
+    }
+
+    // End session if flow completed
+    if (!continueSession) {
+      await supabase.from("ussd_sessions").delete().eq("id", session.id);
+    }
+
+    res.json({
+      USERID: `USER-${MSISDN}`,
+      SESSIONID: session.id,
+      MSISDN,
+      MSG: responseMsg,
+      MSGTYPE: continueSession, // true = continue, false = end
     });
 
-    response.USERID = USERID;
-    response.SESSIONID = SESSIONID;
-
-    console.log("📤 USSD Response:", response);
-    res.json(response);
   } catch (error) {
-    console.error("❌ USSD processing error:", error);
+    console.error("Error handling USSD:", error);
     res.status(500).json({
-      USERID,
-      MSISDN,
-      SESSIONID,
-      MSG: "Service temporarily unavailable. Please try again later.",
-      MSGTYPE: false
+      MSG: "An error occurred. Please try again later.",
+      MSGTYPE: false,
     });
   }
 });
 
-// ----------------- START SERVER -----------------
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 USSD server running on port ${PORT}`);
-});
+app.listen(PORT, () => console.log(`USSD app running on port ${PORT}`));
