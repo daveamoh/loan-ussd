@@ -327,7 +327,6 @@ app.post("/ussd", async (req, res) => {
 
     res.json({
       USERID: `USER-${MSISDN}`,
-      SESSIONID: session.id,
       MSISDN,
       MSG: responseMsg,
       MSGTYPE: continueSession, // true => continue session, false => end
