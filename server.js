@@ -329,7 +329,7 @@ app.post("/ussd", async (req, res) => {
       USERID: `USER-${MSISDN}`,
       MSISDN,
       MSG: responseMsg,
-      MSGTYPE: continueSession, // true => continue session, false => end
+      MSGTYPE: continueSession, // true => continue session, false => end ok 
     });
 
   } catch (error) {
