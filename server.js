@@ -73,7 +73,7 @@ app.post("/ussd", async (req, res) => {
       // Main menu
       case 0: {
         responseMsg =
-          "Welcome to Quick Loans\n1. Register\n2. Apply for Loan\n3. Repay Loan\n4. Check Balance\n5. About\n6. Exit";
+          "Welcome to sika loan\n1. Register\n2. Apply for Loan\n3. Repay Loan\n4. Check Balance\n5. About\n6. Exit";
         await supabase.from("ussd_sessions").update({ step: 1 }).eq("id", session.id);
         break;
       }
@@ -163,11 +163,11 @@ app.post("/ussd", async (req, res) => {
           }
 
         } else if (USERDATA === "5") {
-          responseMsg = "Quick Loans: simple microloans with transparent interest.";
+          responseMsg = "sika loan: simple microloans with transparent interest.";
           continueSession = false;
 
         } else if (USERDATA === "6") {
-          responseMsg = "Thank you for using Quick Loans. Goodbye!";
+          responseMsg = "Thank you for using sika loan. Goodbye!";
           continueSession = false;
 
         } else {
@@ -314,7 +314,7 @@ app.post("/ussd", async (req, res) => {
       default: {
         // reset to main on unknown step
         responseMsg =
-          "Welcome to Quick Loans\n1. Register\n2. Apply for Loan\n3. Repay Loan\n4. Check Balance\n5. About\n6. Exit";
+          "Welcome to sika loan\n1. Register\n2. Apply for Loan\n3. Repay Loan\n4. Check Balance\n5. About\n6. Exit";
         await supabase.from("ussd_sessions").update({ step: 1, data: {} }).eq("id", session.id);
         break;
       }
@@ -329,7 +329,7 @@ app.post("/ussd", async (req, res) => {
       USERID: `USER-${MSISDN}`,
       MSISDN,
       MSG: responseMsg,
-      MSGTYPE: continueSession, // true => continue session, false => end ok 
+      MSGTYPE: continueSession, // true => continue session, false => end
     });
 
   } catch (error) {
