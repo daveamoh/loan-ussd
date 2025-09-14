@@ -219,15 +219,14 @@ app.post("/ussd", async (req, res) => {
       // Registration flow - Step 4: Get ID type
       case 4: {
         const idTypeMap = {
-          '1': 'National ID',
+          '1': 'Ghana Card',
           '2': 'Passport',
-          '3': 'Voter ID',
-          '4': "Driver's License"
+          '3': "Driver's License"
         };
         
         const idType = idTypeMap[USERDATA];
         if (!idType) {
-          responseMsg = "❌ Invalid selection. Select ID type:\n1. National ID\n2. Passport\n3. Voter ID\n4. Driver's License";
+          responseMsg = "❌ Invalid selection. Select ID type:\n1. Ghana Card\n2. Passport\n3. Driver's License";
           break;
         }
         
@@ -238,13 +237,34 @@ app.post("/ussd", async (req, res) => {
           .eq("id", session.id);
         break;
       }
-
-      // Registration flow - Step 5: Get ID number and complete registration
+      
+      // Registration flow - Step 5: Validate ID number and complete registration
       case 5: {
-        // Basic ID validation (at least 4 characters, alphanumeric)
-        const idNumber = USERDATA.trim();
-        if (!/^[a-zA-Z0-9]{4,}$/.test(idNumber)) {
-          responseMsg = `❌ Invalid ${session.data.idType} number. Please enter a valid number (at least 4 characters):`;
+        const idNumber = USERDATA.trim().toUpperCase();
+        const idType = session.data.idType;
+        let isValid = false;
+        let errorMessage = "";
+
+        // Validate based on ID type
+        if (idType === 'Ghana Card') {
+          // Ghana Card format: GHA-xxxxxxxxx-x (example: GHA-123456789-0)
+          const ghanaCardRegex = /^GHA-\d{9}-\d$/;
+          isValid = ghanaCardRegex.test(idNumber);
+          errorMessage = "❌ Invalid Ghana Card format. Example: GHA-123456789-0";
+        } else if (idType === 'Passport') {
+          // Passport format: A1234567 or G1234567
+          const passportRegex = /^[AG]\d{7}$/;
+          isValid = passportRegex.test(idNumber);
+          errorMessage = "❌ Invalid Passport format. Must start with A or G followed by 7 digits. Example: A1234567 or G1234567";
+        } else if (idType === "Driver's License") {
+          // Driver's License format: MIC-DDMMYYYY-XXXX (example: MIC-05081980-7558)
+          const driversLicenseRegex = /^MIC-\d{8}-\d{4}$/;
+          isValid = driversLicenseRegex.test(idNumber);
+          errorMessage = "❌ Invalid Driver's License format. Example: MIC-05081980-7558";
+        }
+
+        if (!isValid) {
+          responseMsg = `${errorMessage}\n\nPlease enter your ${idType} number:`;
           break;
         }
         
@@ -254,7 +274,7 @@ app.post("/ussd", async (req, res) => {
             msisdn: MSISDN,
             name: session.data.name,
             dob: session.data.dob,
-            id_type: session.data.idType,
+            id_type: idType,
             id_number: idNumber,
             registration_date: new Date().toISOString()
           });
