@@ -9,8 +9,12 @@ const app = express();
 app.use(express.json());
 
 // ── Config ──────────────────────────────────────────────────────────────
+// Loan configuration
 const INTEREST_RATE = parseFloat(process.env.INTEREST_RATE || "0.10"); // 10% simple interest
 const LOAN_TERM_DAYS = parseInt(process.env.LOAN_TERM_DAYS || "30", 10); // due date helper
+const MIN_LOAN_AMOUNT = 10; // Minimum loan amount in GHS
+const MAX_LOAN_AMOUNT = 1000; // Maximum loan amount in GHS
+const LOAN_PROCESSING_MESSAGE = "Your application is being processed. You'll receive an SMS confirmation shortly.";
 
 // ── Supabase ────────────────────────────────────────────────────────────
 const supabase = createClient(
@@ -179,72 +183,178 @@ app.post("/ussd", async (req, res) => {
 
       // Registration flow
       case 2: {
+        // Validate name (basic check for at least 2 words with letters only)
+        const nameRegex = /^[A-Za-z]+(?:\s+[A-Za-z]+)+$/;
+        if (!nameRegex.test(USERDATA.trim())) {
+          responseMsg = "❌ Please enter your full name (at least first and last name, letters only):";
+          break;
+        }
+        
         responseMsg = "Enter your date of birth (DD/MM/YYYY):";
         await supabase
           .from("ussd_sessions")
-          .update({ step: 3, data: { name: USERDATA } })
+          .update({ step: 3, data: { ...session.data, name: USERDATA.trim() } })
           .eq("id", session.id);
         break;
       }
 
+      // Registration flow - Step 3: Get date of birth and validate
       case 3: {
-        responseMsg = "Enter your National ID number:";
+        // Validate date of birth format (DD/MM/YYYY)
+        const dobRegex = /^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[0-2])\/(19|20)\d{2}$/;
+        if (!dobRegex.test(USERDATA)) {
+          responseMsg = "❌ Invalid date format. Please enter date of birth as DD/MM/YYYY:";
+          break;
+        }
+        
+        // Ask for ID type
+        responseMsg = "Select ID type:\n1. National ID\n2. Passport\n3. Voter ID\n4. Driver's License";
         await supabase
           .from("ussd_sessions")
           .update({ step: 4, data: { ...session.data, dob: USERDATA } })
           .eq("id", session.id);
         break;
       }
-
+      
+      // Registration flow - Step 4: Get ID type
       case 4: {
-        // Save user
-        await supabase.from("users").upsert({
-          msisdn: MSISDN,
-          name: session.data.name,
-          dob: session.data.dob,
-          national_id: USERDATA
-        });
-        responseMsg = `Registration successful! Thank you, ${session.data?.name || "user"}.`;
-        continueSession = false;
+        const idTypeMap = {
+          '1': 'National ID',
+          '2': 'Passport',
+          '3': 'Voter ID',
+          '4': "Driver's License"
+        };
+        
+        const idType = idTypeMap[USERDATA];
+        if (!idType) {
+          responseMsg = "❌ Invalid selection. Select ID type:\n1. National ID\n2. Passport\n3. Voter ID\n4. Driver's License";
+          break;
+        }
+        
+        responseMsg = `Enter your ${idType} number:`;
+        await supabase
+          .from("ussd_sessions")
+          .update({ step: 5, data: { ...session.data, idType } })
+          .eq("id", session.id);
         break;
       }
 
-      // Loan application (with interest)
-      case 10: {
-        const principal = Number.parseFloat(USERDATA);
-        if (Number.isNaN(principal) || principal <= 0) {
-          responseMsg = "Invalid amount. Enter loan amount (GHS):";
-        } else {
-          const interestAmount = +(principal * INTEREST_RATE).toFixed(2);
-          const totalDue = +(principal + interestAmount).toFixed(2);
-          const balance = totalDue;
-          const dueDate = addDays(new Date(), LOAN_TERM_DAYS);
-
-          const { data: loan, error: lErr } = await supabase
-            .from("loans")
-            .insert([{
-              user_id: session.data.userId,
-              principal: principal.toFixed(2),
-              interest_rate: INTEREST_RATE,
-              interest_amount: interestAmount.toFixed(2),
-              total_due: totalDue.toFixed(2),
-              balance: balance.toFixed(2),
-              status: "active",
-              due_date: dueDate
-            }])
-            .select()
-            .single();
-          if (lErr) throw lErr;
-
-          responseMsg =
-            `Loan Approved!\n` +
-            `Principal: GHS ${money(loan.principal)}\n` +
-            `Interest (${(loan.interest_rate * 100).toFixed(2)}%): GHS ${money(loan.interest_amount)}\n` +
-            `Total Due: GHS ${money(loan.total_due)}\n` +
-            `Due: ${loan.due_date}`;
+      // Registration flow - Step 5: Get ID number and complete registration
+      case 5: {
+        // Basic ID validation (at least 4 characters, alphanumeric)
+        const idNumber = USERDATA.trim();
+        if (!/^[a-zA-Z0-9]{4,}$/.test(idNumber)) {
+          responseMsg = `❌ Invalid ${session.data.idType} number. Please enter a valid number (at least 4 characters):`;
+          break;
+        }
+        
+        try {
+          // Save user with ID type information
+          const { error } = await supabase.from("users").upsert({
+            msisdn: MSISDN,
+            name: session.data.name,
+            dob: session.data.dob,
+            id_type: session.data.idType,
+            id_number: idNumber,
+            registration_date: new Date().toISOString()
+          });
+          
+          if (error) throw error;
+          
+          responseMsg = `✅ Registration successful!\nThank you, ${session.data.name || 'valued customer'}.\n\nYou can now apply for a loan.`;
+          continueSession = false;
+          
+          // Clean up session
+          await supabase.from("ussd_sessions").delete().eq("id", session.id);
+          
+        } catch (error) {
+          console.error("Registration error:", error);
+          if (error.code === '23505') { // Unique violation
+            responseMsg = "❌ This ID number is already registered. Please contact support if this is an error.";
+          } else {
+            responseMsg = "❌ An error occurred during registration. Please try again.";
+          }
           continueSession = false;
         }
         break;
+      }
+
+      // Loan application flow
+      case 10: {
+        // Clean and validate input
+        const cleanAmount = USERDATA.trim().replace(/[^0-9.]/g, '');
+        const principal = Number.parseFloat(cleanAmount);
+        
+        // Validate loan amount
+        if (Number.isNaN(principal) || principal <= 0) {
+          responseMsg = "❌ Invalid amount. Please enter a valid number:";
+          break;
+        } else if (principal < MIN_LOAN_AMOUNT) {
+          responseMsg = `❌ Minimum loan amount is GHS ${MIN_LOAN_AMOUNT}. Please enter a higher amount:`;
+          break;
+        } else if (principal > MAX_LOAN_AMOUNT) {
+          responseMsg = `❌ Maximum loan amount is GHS ${MAX_LOAN_AMOUNT}. Please enter a lower amount:`;
+          break;
+        }
+        
+        try {
+            // Calculate loan details
+            const interest = principal * INTEREST_RATE;
+            const totalDue = principal + interest;
+            const dueDate = addDays(new Date(), LOAN_TERM_DAYS);
+            const formattedDueDate = new Date(dueDate).toLocaleDateString('en-GB');
+
+            // Create loan record
+            const { data: loan, error: loanError } = await supabase
+              .from("loans")
+              .insert([
+                {
+                  user_id: session.data.userId,
+                  principal,
+                  interest_rate: INTEREST_RATE,
+                  interest_amount: interest,
+                  total_due: totalDue,
+                  balance: totalDue,
+                  due_date: dueDate,
+                  status: "pending", // Start with pending status
+                },
+              ])
+              .select()
+              .single();
+
+            if (loanError) throw loanError;
+
+            // Update user's last loan application date
+            await supabase
+              .from("users")
+              .update({ last_loan_application: new Date().toISOString() })
+              .eq("id", session.data.userId);
+
+            // Send success message
+            responseMsg = `✅ Loan application received!\n\n` +
+              `Amount: GHS ${money(principal)}\n` +
+              `Interest (${(INTEREST_RATE * 100).toFixed(0)}%): GHS ${money(interest)}\n` +
+              `Total to repay: GHS ${money(totalDue)}\n` +
+              `Due date: ${formattedDueDate}\n\n` +
+              `Your application is being processed. You'll receive an SMS confirmation shortly.`;
+            
+            // End session after successful application
+            continueSession = false;
+            
+            // Clean up session
+            await supabase.from("ussd_sessions").delete().eq("id", session.id);
+            
+            // In a real app, you would trigger an SMS notification here
+            // await sendSMS(MSISDN, `Your loan application for GHS ${money(principal)} has been received and is being processed.`);
+            
+          } catch (error) {
+            console.error("Loan application error:", error);
+            responseMsg = "❌ An error occurred while processing your application. Please try again later.";
+            continueSession = false;
+            // Clean up session on error
+            await supabase.from("ussd_sessions").delete().eq("id", session.id);
+          }
+          break;
       }
 
       // Repayment (records payments + reduces balance; closes when 0)
