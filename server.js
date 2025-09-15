@@ -208,7 +208,7 @@ app.post("/ussd", async (req, res) => {
         }
         
         // Ask for ID type
-        responseMsg = "Select ID type:\n1. National ID\n2. Passport\n3. Voter ID\n4. Driver's License";
+        responseMsg = "Select ID type:\n1. National ID\n2. Passport\n3. Driver's License";
         await supabase
           .from("ussd_sessions")
           .update({ step: 4, data: { ...session.data, dob: USERDATA } })
