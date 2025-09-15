@@ -275,7 +275,7 @@ app.post("/ussd", async (req, res) => {
             name: session.data.name,
             dob: session.data.dob,
             id_type: idType,
-            id_number: idNumber,
+            idnumber: idNumber,  // Changed from id_number to idnumber
             registration_date: new Date().toISOString()
           });
           
