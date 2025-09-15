@@ -274,7 +274,7 @@ app.post("/ussd", async (req, res) => {
             msisdn: MSISDN,
             name: session.data.name,
             dob: session.data.dob,
-            id_type: idType,
+            idtype: idType,  // Changed from id_type to idtype
             idnumber: idNumber,  // Changed from id_number to idnumber
             registration_date: new Date().toISOString()
           });
