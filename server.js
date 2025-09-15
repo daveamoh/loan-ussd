@@ -207,11 +207,17 @@ app.post("/ussd", async (req, res) => {
           break;
         }
         
+        // Parse the date from DDMMYYYY to YYYY-MM-DD format for database
+        const day = USERDATA.substring(0, 2);
+        const month = USERDATA.substring(2, 4);
+        const year = USERDATA.substring(4);
+        const formattedDob = `${year}-${month}-${day}`;
+        
         // Ask for ID type
-        responseMsg = "Select ID type:\n1. National ID\n2. Passport\n3. Driver's License";
+        responseMsg = "Select ID type:\n1. Ghana Card\n2. Passport\n3. Driver's License";
         await supabase
           .from("ussd_sessions")
-          .update({ step: 4, data: { ...session.data, dob: USERDATA } })
+          .update({ step: 4, data: { ...session.data, dob: formattedDob } })
           .eq("id", session.id);
         break;
       }
