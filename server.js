@@ -190,7 +190,7 @@ app.post("/ussd", async (req, res) => {
           break;
         }
         
-        responseMsg = "Enter your date of birth (DD/MM/YYYY):";
+        responseMsg = "Enter your date of birth (DDMMYYYY, e.g., 15091990 for 15th September 1990):";
         await supabase
           .from("ussd_sessions")
           .update({ step: 3, data: { ...session.data, name: USERDATA.trim() } })
@@ -200,10 +200,10 @@ app.post("/ussd", async (req, res) => {
 
       // Registration flow - Step 3: Get date of birth and validate
       case 3: {
-        // Validate date of birth format (DD/MM/YYYY)
-        const dobRegex = /^(0[1-9]|[12][0-9]|3[01])\/(0[1-9]|1[0-2])\/(19|20)\d{2}$/;
+        // Validate date of birth format (DDMMYYYY)
+        const dobRegex = /^(0[1-9]|[12][0-9]|3[01])(0[1-9]|1[0-2])(19|20)\d{2}$/;
         if (!dobRegex.test(USERDATA)) {
-          responseMsg = "❌ Invalid date format. Please enter date of birth as DD/MM/YYYY:";
+          responseMsg = "❌ Invalid date format. Please enter date of birth as DDMMYYYY (e.g., 15091990 for 15th September 1990):";
           break;
         }
         
@@ -247,10 +247,10 @@ app.post("/ussd", async (req, res) => {
 
         // Validate based on ID type
         if (idType === 'Ghana Card') {
-          // Ghana Card format: GHA-xxxxxxxxx-x (example: GHA-123456789-0)
-          const ghanaCardRegex = /^GHA-\d{9}-\d$/;
+          // Ghana Card format: GHA followed by 10 digits (example: GHA1234567890)
+          const ghanaCardRegex = /^GHA\d{10}$/;
           isValid = ghanaCardRegex.test(idNumber);
-          errorMessage = "❌ Invalid Ghana Card format. Example: GHA-123456789-0";
+          errorMessage = "❌ Invalid Ghana Card format. Example: GHA1234567890";
         } else if (idType === 'Passport') {
           // Passport format: A1234567 or G1234567
           const passportRegex = /^[AG]\d{7}$/;
